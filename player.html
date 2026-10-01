@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>YouTube Lite Player</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;background:#000;overflow:hidden;font-family:Arial,Helvetica,sans-serif}
+#app{position:relative;width:100%;height:100%;background:#000;color:#fff;overflow:hidden}
+#playerHost{position:absolute;inset:0;background:#000}
+#playerHost iframe{display:block;width:100%;height:100%;border:0}
+
+/* Top information row */
+.topbar{position:absolute;z-index:10;left:0;right:0;top:0;padding:18px 20px 28px;display:flex;align-items:center;gap:12px;background:linear-gradient(to bottom,rgba(0,0,0,.82),rgba(0,0,0,0));pointer-events:none;opacity:0;transition:opacity .18s ease}
+#app.show-ui .topbar,#app:hover .topbar{opacity:1}
+.avatar{width:38px;height:38px;border-radius:50%;object-fit:cover;background:#333;flex:none;border:1px solid rgba(255,255,255,.25)}
+.meta{min-width:0;max-width:min(70vw,900px);text-shadow:0 1px 2px #000}
+.title{font-size:15px;font-weight:600;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.channel{font-size:13px;color:#ddd;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.top-actions{margin-left:auto;display:flex;gap:6px;pointer-events:auto}
+
+/* Custom controls */
+.controls{position:absolute;z-index:10;left:0;right:0;bottom:0;padding:0 14px 10px;background:linear-gradient(to top,rgba(0,0,0,.88),rgba(0,0,0,0));opacity:0;transition:opacity .18s ease;pointer-events:none}
+#app.show-ui .controls,#app:hover .controls{opacity:1}
+.progress-wrap{height:18px;display:flex;align-items:center;cursor:pointer;pointer-events:auto}
+.progress{position:relative;width:100%;height:4px;border-radius:4px;background:rgba(255,255,255,.30);overflow:visible}
+.progress-buffer{position:absolute;left:0;top:0;height:100%;width:0;background:rgba(255,255,255,.42);border-radius:4px}
+.progress-played{position:absolute;left:0;top:0;height:100%;width:0;background:#f00;border-radius:4px}
+.progress-dot{position:absolute;top:50%;left:0;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:50%;background:#f00;opacity:0;transition:opacity .12s}
+.progress-wrap:hover .progress-dot{opacity:1}
+.control-row{height:42px;display:flex;align-items:center;gap:2px;pointer-events:auto}
+.left-controls,.right-controls{display:flex;align-items:center;gap:1px}
+.right-controls{margin-left:auto}
+.btn{width:38px;height:38px;border:0;background:transparent;color:#fff;border-radius:4px;display:grid;place-items:center;cursor:pointer;padding:0}
+.btn:hover{background:rgba(255,255,255,.14)}
+.btn svg{width:22px;height:22px;fill:currentColor;stroke:currentColor}
+.btn.small svg{width:20px;height:20px}
+.time{font-size:12px;color:#fff;margin:0 8px;white-space:nowrap;user-select:none;text-shadow:0 1px 2px #000}
+.vol-wrap{display:flex;align-items:center}
+.vol-slider{width:0;opacity:0;transition:width .15s,opacity .15s;accent-color:#fff;cursor:pointer}
+.vol-wrap:hover .vol-slider{width:78px;opacity:1;margin-right:5px}
+
+/* Center click area */
+.center-play{position:absolute;z-index:9;left:50%;top:50%;transform:translate(-50%,-50%);width:72px;height:72px;border:0;border-radius:50%;background:rgba(0,0,0,.58);color:#fff;display:grid;place-items:center;opacity:0;pointer-events:none;transition:opacity .15s,transform .15s;cursor:pointer}
+.center-play svg{width:34px;height:34px;fill:#fff}
+#app.paused .center-play,#app.ended .center-play{opacity:.95;pointer-events:auto}
+#app.paused .center-play:hover{transform:translate(-50%,-50%) scale(1.05)}
+
+/* Menus */
+.menu{position:absolute;right:12px;bottom:58px;z-index:20;min-width:170px;background:rgba(28,28,28,.97);border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,.55);padding:7px;display:none}
+.menu.open{display:block}
+.menu button{width:100%;border:0;background:transparent;color:#fff;text-align:left;padding:9px 10px;border-radius:5px;cursor:pointer;font-size:13px}
+.menu button:hover{background:rgba(255,255,255,.12)}
+.menu .section{padding:7px 10px 4px;color:#aaa;font-size:11px;text-transform:uppercase}
+
+#error{display:none;position:absolute;inset:0;z-index:100;color:#fff;background:#000;font:14px Arial;padding:30px;box-sizing:border-box}
+#error code{color:#aaa}
+
+@media(max-width:600px){
+  .topbar{padding:12px 10px 24px}.avatar{width:32px;height:32px}.title{font-size:13px}.channel{font-size:12px}
+  .btn{width:34px;height:34px}.time{font-size:11px;margin:0 5px}.vol-wrap:hover .vol-slider{width:55px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="playerHost"></div>
+
+  <div class="topbar">
+    <img id="avatar" class="avatar" alt="Channel" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Crect width='80' height='80' fill='%23333'/%3E%3Ccircle cx='40' cy='30' r='13' fill='%23888'/%3E%3Cpath d='M17 70c4-16 42-16 46 0' fill='%23888'/%3E%3C/svg%3E">
+    <div class="meta">
+      <div id="videoTitle" class="title">YouTube Lite</div>
+      <div id="channelName" class="channel">Loading…</div>
+    </div>
+    <div class="top-actions">
+      <button id="watchLaterTop" class="btn" title="Add to Watch Later" aria-label="Add to Watch Later">
+        <svg viewBox="0 0 24 24"><path d="M18 2H6a2 2 0 0 0-2 2v18l8-3.5 8 3.5V4a2 2 0 0 0-2-2zm0 17-6-2.63L6 19V4h12v15z"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <button id="centerPlay" class="center-play" aria-label="Play">
+    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+  </button>
+
+  <div class="controls">
+    <div id="progressWrap" class="progress-wrap" title="Seek">
+      <div class="progress">
+        <div id="buffered" class="progress-buffer"></div>
+        <div id="played" class="progress-played"></div>
+        <div id="progressDot" class="progress-dot"></div>
+      </div>
+    </div>
+
+    <div class="control-row">
+      <div class="left-controls">
+        <button id="play" class="btn" title="Play / Pause (Space)" aria-label="Play / Pause"></button>
+        <div class="vol-wrap">
+          <button id="mute" class="btn" title="Mute / Unmute (M)" aria-label="Mute / Unmute"></button>
+          <input id="volume" class="vol-slider" type="range" min="0" max="100" value="100" aria-label="Volume">
+        </div>
+        <button id="back10" class="btn" title="Back 10 seconds (J)" aria-label="Back 10 seconds">
+          <svg viewBox="0 0 24 24"><path d="M11 7V4L6 8l5 4V9c3.3 0 6 2.7 6 6s-2.7 6-6 6c-2.5 0-4.7-1.6-5.6-3.8l-1.9.7C4.8 21 7.7 23 11 23c4.4 0 8-3.6 8-8s-3.6-8-8-8z"/><text x="7.1" y="17" font-size="5.5" font-weight="700" fill="currentColor" stroke="none">10</text></svg>
+        </button>
+        <button id="forward10" class="btn" title="Forward 10 seconds (L)" aria-label="Forward 10 seconds">
+          <svg viewBox="0 0 24 24"><path d="M13 7V4l5 4-5 4V9c-3.3 0-6 2.7-6 6s2.7 6 6 6c2.5 0 4.7-1.6 5.6-3.8l1.9.7C19.2 21 16.3 23 13 23c-4.4 0-8-3.6-8-8s3.6-8 8-8z"/><text x="11.1" y="17" font-size="5.5" font-weight="700" fill="currentColor" stroke="none">10</text></svg>
+        </button>
+        <span id="time" class="time">0:00 / 0:00</span>
+      </div>
+
+      <div class="right-controls">
+        <button id="cc" class="btn small" title="Subtitles / CC" aria-label="Subtitles / CC">
+          <svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm2 4v2h4V9H6zm8 0v2h4V9h-4z"/></svg>
+        </button>
+        <button id="ytLogo" class="btn" title="Open on YouTube" aria-label="Open on YouTube">
+          <svg viewBox="0 0 24 24"><path d="M23.5 6.2a3 3 0 0 0-2.1-2.1C19.5 3.6 12 3.6 12 3.6s-7.5 0-9.4.5A3 3 0 0 0 .5 6.2 31 31 0 0 0 0 12a31 31 0 0 0 .5 5.8 3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1A31 31 0 0 0 24 12a31 31 0 0 0-.5-5.8zM9.6 15.9V8.1l6.5 3.9-6.5 3.9z"/></svg>
+        </button>
+        <button id="settings" class="btn" title="Settings" aria-label="Settings">
+          <svg viewBox="0 0 24 24"><path d="M19.4 13a7.8 7.8 0 0 0 .1-1 7.8 7.8 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8.4 8.4 0 0 0-1.7-1L15 3.5h-4l-.3 2.6a8.4 8.4 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.5a7.8 7.8 0 0 0-.1 1 7.8 7.8 0 0 0 .1 1l-2 1.5 2 3.4 2.4-1a8.4 8.4 0 0 0 1.7 1l.3 2.6h4l.3-2.6a8.4 8.4 0 0 0 1.7-1l2.4 1 2-3.4-2-1.5zM13 15.5A3.5 3.5 0 1 1 13 8a3.5 3.5 0 0 1 0 7.5z"/></svg>
+        </button>
+        <button id="fullscreen" class="btn" title="Fullscreen (F)" aria-label="Fullscreen">
+          <svg viewBox="0 0 24 24"><path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div id="settingsMenu" class="menu">
+    <div class="section">Playback speed</div>
+    <button data-speed="0.5">0.5×</button>
+    <button data-speed="0.75">0.75×</button>
+    <button data-speed="1">Normal</button>
+    <button data-speed="1.25">1.25×</button>
+    <button data-speed="1.5">1.5×</button>
+    <button data-speed="2">2×</button>
+    <div class="section">Player</div>
+    <button id="watchLaterMenu">Add to Watch Later</button>
+  </div>
+
+  <div id="error"><div>No valid video ID was supplied.</div><br><code>Expected: ?v=11_character_YouTube_ID</code></div>
+</div>
+
+<script>
+(function(){
+  'use strict';
+  const params=new URLSearchParams(location.search);
+  const videoId=params.get('v')||'';
+  const autoplay=params.get('autoplay')==='1';
+  const passedTitle=params.get('title')||'';
+  const passedChannel=params.get('channel')||'';
+  const passedAvatar=params.get('avatar')||'';
+  const app=document.getElementById('app');
+  const error=document.getElementById('error');
+  if(!/^[A-Za-z0-9_-]{11}$/.test(videoId)){
+    error.style.display='block';
+    return;
+  }
+
+  const $=id=>document.getElementById(id);
+  let player=null, timer=null, uiTimer=null, lastState=-1, metadataLoaded=false;
+  const defaultAvatar=$('avatar').src;
+  if(passedTitle) $('videoTitle').textContent=passedTitle;
+  if(passedChannel) $('channelName').textContent=passedChannel;
+  if(passedAvatar){ $('avatar').src=passedAvatar; $('avatar').onerror=()=>{$('avatar').src=defaultAvatar}; }
+
+  function fmt(sec){
+    sec=Math.max(0,Math.floor(Number(sec)||0));
+    const h=Math.floor(sec/3600), m=Math.floor((sec%3600)/60), s=sec%60;
+    return h ? h+':'+String(m).padStart(2,'0')+':'+String(s).padStart(2,'0') : m+':'+String(s).padStart(2,'0');
+  }
+  function icon(name){
+    if(name==='pause') return '<svg viewBox="0 0 24 24"><path d="M6 4h4v16H6zm8 0h4v16h-4z"/></svg>';
+    if(name==='play') return '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+    if(name==='mute') return '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.1-3.8v7.6a4.5 4.5 0 0 0 2.1-3.8zm0-8.5v2.1c3.4 1 5.5 4.1 5.5 6.4s-2.1 5.4-5.5 6.4v2.1c4.6-1.1 7.5-5.1 7.5-8.5s-2.9-7.4-7.5-8.5z"/></svg>';
+    return '<svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9H3z"/><path d="M16 9l5 6M21 9l-5 6" fill="none" stroke="currentColor" stroke-width="2"/></svg>';
+  }
+  function setPlayIcon(){
+    $('play').innerHTML=(lastState===1)?icon('pause'):icon('play');
+  }
+  function setMuteIcon(){
+    try{$('mute').innerHTML=player && player.isMuted()?icon('mute'):icon('volume');}catch(e){}
+  }
+  function showUI(){
+    app.classList.add('show-ui');
+    clearTimeout(uiTimer);
+    uiTimer=setTimeout(()=>app.classList.remove('show-ui'),2200);
+  }
+  ['mousemove','keydown','click'].forEach(ev=>app.addEventListener(ev,showUI,{passive:true}));
+
+  function seekBy(delta){
+    if(!player || !player.getCurrentTime) return;
+    const now=player.getCurrentTime(), dur=player.getDuration()||0;
+    player.seekTo(Math.max(0,Math.min(dur,now+delta)),true);
+    showUI();
+  }
+  function togglePlay(){
+    if(!player) return;
+    if(lastState===1) player.pauseVideo(); else player.playVideo();
+    showUI();
+  }
+
+  $('play').addEventListener('click',togglePlay);
+  $('centerPlay').addEventListener('click',togglePlay);
+  $('back10').addEventListener('click',()=>seekBy(-10));
+  $('forward10').addEventListener('click',()=>seekBy(10));
+  $('mute').addEventListener('click',()=>{
+    if(!player)return;
+    if(player.isMuted()) player.unMute(); else player.mute();
+    setMuteIcon(); showUI();
+  });
+  $('volume').addEventListener('input',e=>{if(player) player.setVolume(Number(e.target.value));});
+
+  $('progressWrap').addEventListener('click',e=>{
+    if(!player)return;
+    const r=$('progressWrap').getBoundingClientRect();
+    const pct=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width));
+    const dur=player.getDuration()||0;
+    player.seekTo(pct*dur,true);
+    showUI();
+  });
+
+  $('fullscreen').addEventListener('click',()=>{
+    const el=document.documentElement;
+    if(document.fullscreenElement) document.exitFullscreen();
+    else if(el.requestFullscreen) el.requestFullscreen();
+  });
+
+  $('ytLogo').addEventListener('click',()=>{
+    window.open('https://www.youtube.com/watch?v='+encodeURIComponent(videoId),'_blank','noopener');
+  });
+
+  function saveWatchLater(){
+    const item={
+      videoId,
+      title:$('videoTitle').textContent,
+      channel:$('channelName').textContent,
+      savedAt:Date.now()
+    };
+    let list=[];
+    try{list=JSON.parse(localStorage.getItem('ytLiteWatchLater')||'[]');}catch(e){}
+    list=list.filter(x=>x && x.videoId!==videoId);
+    list.unshift(item);
+    localStorage.setItem('ytLiteWatchLater',JSON.stringify(list.slice(0,200)));
+    $('watchLaterTop').title='Saved to Watch Later';
+    $('watchLaterTop').style.opacity='.65';
+    $('watchLaterMenu').textContent='Saved to Watch Later';
+  }
+  $('watchLaterTop').addEventListener('click',saveWatchLater);
+  $('watchLaterMenu').addEventListener('click',saveWatchLater);
+
+  $('settings').addEventListener('click',e=>{
+    e.stopPropagation();
+    $('settingsMenu').classList.toggle('open');
+    showUI();
+  });
+  document.addEventListener('click',e=>{
+    if(!$('settingsMenu').contains(e.target) && e.target!==$('settings')) $('settingsMenu').classList.remove('open');
+  });
+  document.querySelectorAll('[data-speed]').forEach(b=>b.addEventListener('click',()=>{
+    if(player) player.setPlaybackRate(Number(b.dataset.speed));
+    $('settingsMenu').classList.remove('open'); showUI();
+  }));
+
+  let ccOn=false;
+  $('cc').addEventListener('click',()=>{
+    if(!player)return;
+    /* The IFrame API does not expose a direct CC on/off method. Recreate the
+       embed with cc_load_policy while preserving the current position. */
+    const t=player.getCurrentTime?player.getCurrentTime():0;
+    const state=lastState;
+    ccOn=!ccOn;
+    try{ player.destroy(); }catch(e){}
+    createPlayer(ccOn,t,state===1);
+    showUI();
+  });
+
+  function loadMetadata(){
+    if(!player || metadataLoaded) return;
+    try{
+      const d=player.getVideoData();
+      if(d){
+        if(!passedTitle && d.title) $('videoTitle').textContent=d.title;
+        if(!passedChannel && d.author) $('channelName').textContent=d.author;
+        metadataLoaded=true;
+      }
+    }catch(e){}
+    /* Best-effort fallback for direct player-page links that do not contain
+       metadata from the extension search result. */
+    if(!passedTitle || !passedChannel){
+      fetch('https://www.youtube.com/oembed?url='+encodeURIComponent('https://www.youtube.com/watch?v='+videoId)+'&format=json')
+        .then(r=>r.ok?r.json():null).then(d=>{
+          if(!d)return;
+          if(!passedTitle && d.title)$('videoTitle').textContent=d.title;
+          if(!passedChannel && d.author_name)$('channelName').textContent=d.author_name;
+        }).catch(()=>{});
+    }
+  }
+
+  function update(){
+    if(!player || !player.getCurrentTime)return;
+    try{
+      const cur=player.getCurrentTime()||0, dur=player.getDuration()||0, loaded=player.getVideoLoadedFraction?player.getVideoLoadedFraction():0;
+      const pct=dur?Math.max(0,Math.min(1,cur/dur)):0;
+      $('played').style.width=(pct*100)+'%';
+      $('progressDot').style.left=(pct*100)+'%';
+      $('buffered').style.width=(Math.max(0,Math.min(1,loaded))*100)+'%';
+      $('time').textContent=fmt(cur)+' / '+fmt(dur);
+      $('volume').value=player.isMuted()?0:(player.getVolume()||0);
+    }catch(e){}
+  }
+
+  function createPlayer(captionsOn, startAt, shouldPlay){
+    $('playerHost').innerHTML='';
+    player=new YT.Player('playerHost',{
+      width:'100%',height:'100%',videoId:videoId,
+      playerVars:{
+        autoplay:0,
+        cc_load_policy:captionsOn?1:0,
+        controls:0,
+        disablekb:0,
+        enablejsapi:1,
+        fs:0,
+        modestbranding:1,
+        playsinline:1,
+        rel:0,
+        origin:location.origin,
+        start:Math.max(0,Math.floor(startAt||0))
+      },
+      events:{
+        onReady:function(e){
+          try{e.target.setVolume(Number($('volume').value)||100);}catch(x){}
+          loadMetadata();
+          setPlayIcon(); setMuteIcon(); update();
+          if(shouldPlay || autoplay) e.target.playVideo();
+        },
+        onStateChange:function(e){
+          lastState=e.data;
+          app.classList.toggle('paused',e.data===YT.PlayerState.PAUSED||e.data===YT.PlayerState.CUED);
+          app.classList.toggle('ended',e.data===YT.PlayerState.ENDED);
+          setPlayIcon();
+          if(e.data===YT.PlayerState.PLAYING) loadMetadata();
+          showUI();
+        },
+        onError:function(e){
+          if(e.data===153){
+            error.innerHTML='<div>YouTube player configuration error (153).</div><br><code>The HTTPS player page is not sending the required player identity.</code>';
+            error.style.display='block';
+          }
+        },
+        onAutoplayBlocked:function(){ showUI(); }
+      }
+    });
+  }
+
+  window.onYouTubeIframeAPIReady=function(){
+    createPlayer(false,0,autoplay);
+    timer=setInterval(update,250);
+  };
+
+  const tag=document.createElement('script');
+  tag.src='https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+})();
+</script>
+</body>
+</html>
